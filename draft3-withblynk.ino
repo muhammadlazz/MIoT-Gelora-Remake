@@ -15,7 +15,6 @@
 char ssid[] = "lazz";
 char pass[] = "dollar$$";
 
-// --- 1. PENGATURAN PIN ---
 #define I2C_SDA 21  
 #define I2C_SCL 22  
 #define trigPin 13 
@@ -25,64 +24,50 @@ char pass[] = "dollar$$";
 #define servoPin 14  
 #define oneWireBus 27 
 
-// --- 2. INISIALISASI OBJEK ---
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 Servo pakanServo; 
 BlynkTimer timer;
 OneWire oneWire(oneWireBus); 
 DallasTemperature sensors(&oneWire); 
 
-// --- 3. KONFIGURASI RELAY & LDR ---
 const int KONDISI_GELAP = HIGH; 
 const int RELAY_NYALA = LOW; 
 const int RELAY_MATI = HIGH;   
 
-// --- 4. VARIABLE GLOBAL ---
 float suhuAir = 0;
 float jarak = 0;
 String statusLampuStr = "OFF";
 
-// Variabel Kontrol Manual
-bool modeAutoLampu = true; // Default: Otomatis (pakai LDR)
-int manualLampuState = 0;  // Status tombol manual V4
+bool modeAutoLampu = true; 
+int manualLampuState = 0;  
 
-// --- 5. PENGATURAN JADWAL PAKAN ---
 unsigned long previousMillis = 0;
-const long intervalPakan = 10000; // 10 Detik (Tes)
+const long intervalPakan = 10000; 
 
-// --- FUNGSI BLYNK WRITE (KONTROL DARI HP) ---
-
-// V3: Tombol Pakan Manual (Push Button)
 BLYNK_WRITE(V3) {
   int pinValue = param.asInt();
   if (pinValue == 1) {
-    beriPakanIkan(); // Langsung beri pakan
+    beriPakanIkan(); 
   }
 }
 
-// V4: Saklar Lampu Manual (Switch)
 BLYNK_WRITE(V4) {
-  manualLampuState = param.asInt(); // 1 = ON, 0 = OFF
-  // Jika mode manual aktif, langsung update relay
+  manualLampuState = param.asInt(); 
   if (!modeAutoLampu) {
     if (manualLampuState == 1) digitalWrite(relayPin, RELAY_NYALA);
     else digitalWrite(relayPin, RELAY_MATI);
   }
 }
 
-// V5: Mode Otomatis Lampu (Switch)
-// ON = Pakai LDR (Auto), OFF = Pakai Tombol V4 (Manual)
 BLYNK_WRITE(V5) {
   int pinValue = param.asInt();
   modeAutoLampu = (pinValue == 1);
   
-  // Sinkronisasi status saat pindah mode
   if (!modeAutoLampu) {
-    Blynk.virtualWrite(V4, manualLampuState); // Update tombol V4 sesuai status terakhir
+    Blynk.virtualWrite(V4, manualLampuState); 
   }
 }
 
-// Sync status saat connect agar tombol di HP sesuai dengan ESP32
 BLYNK_CONNECTED() {
   Blynk.syncVirtual(V4);
   Blynk.syncVirtual(V5);
@@ -91,21 +76,18 @@ BLYNK_CONNECTED() {
 void setup() {
   Serial.begin(115200);
 
-  // --- Init LCD ---
   Wire.begin(I2C_SDA, I2C_SCL);
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
   lcd.print("Connecting...");
 
-  // --- Init Sensor & Actuator ---
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
   pinMode(ldrPin, INPUT);
   pinMode(relayPin, OUTPUT);
   digitalWrite(relayPin, RELAY_MATI); 
 
-  // --- Init Servo ---
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
   ESP32PWM::allocateTimer(2);
@@ -114,10 +96,8 @@ void setup() {
   pakanServo.attach(servoPin, 500, 2400); 
   pakanServo.write(0); 
 
-  // --- Init Suhu ---
   sensors.begin();
 
-  // --- Init Blynk ---
   Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
 
   lcd.clear();
@@ -125,7 +105,6 @@ void setup() {
   delay(1000);
   lcd.clear();
 
-  // --- SETUP TIMER ---
   timer.setInterval(1000L, timerEvent);
 }
 
@@ -133,7 +112,6 @@ void loop() {
   Blynk.run();
   timer.run();
 
-  // Cek Jadwal Makan (Otomatis)
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillis >= intervalPakan) {
     previousMillis = currentMillis;
@@ -141,21 +119,16 @@ void loop() {
   }
 }
 
-// --- FUNGSI UTAMA (Dijalankan Timer tiap 1 detik) ---
 void timerEvent() {
-  // 1. Baca Sensor
   jarak = ukurJarakCm();
   sensors.requestTemperatures(); 
   suhuAir = sensors.getTempCByIndex(0);
   int statusLDR = digitalRead(ldrPin);
 
-  // 2. Logika Lampu (Cerdas: Auto atau Manual)
   if (modeAutoLampu) {
-    // --- MODE OTOMATIS (LDR) ---
     if (statusLDR == KONDISI_GELAP) {
       digitalWrite(relayPin, RELAY_NYALA);
       statusLampuStr = "AUTO:ON";
-      // Update tombol V4 di aplikasi biar sinkron
       Blynk.virtualWrite(V4, 1); 
     } else {
       digitalWrite(relayPin, RELAY_MATI);
@@ -163,7 +136,6 @@ void timerEvent() {
       Blynk.virtualWrite(V4, 0);
     }
   } else {
-    // --- MODE MANUAL (Tombol V4) ---
     if (manualLampuState == 1) {
       digitalWrite(relayPin, RELAY_NYALA);
       statusLampuStr = "MAN:ON";
@@ -173,14 +145,12 @@ void timerEvent() {
     }
   }
 
-  // 3. Update LCD & Blynk
   updateLCD();
 
   Blynk.virtualWrite(V0, suhuAir);       
   Blynk.virtualWrite(V1, jarak);         
   Blynk.virtualWrite(V2, statusLampuStr); 
   
-  // Debug
   Serial.print("Suhu: "); Serial.print(suhuAir);
   Serial.print(" | Mode: "); Serial.println(modeAutoLampu ? "Auto" : "Manual");
 }
@@ -192,7 +162,6 @@ void updateLCD() {
   else lcd.print(suhuAir, 0);
   lcd.print((char)223); lcd.print("C ");
   
-  // Tampilkan status lampu singkat
   lcd.print(statusLampuStr); 
 
   lcd.setCursor(0, 1);
