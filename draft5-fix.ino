@@ -15,7 +15,6 @@
 char ssid[] = "lazz";
 char pass[] = "hashtag#";
 
-// --- 1. PENGATURAN PIN ---
 #define I2C_SDA 21  
 #define I2C_SCL 22  
 #define trigPin 13 
@@ -25,49 +24,39 @@ char pass[] = "hashtag#";
 #define servoPin 14  
 #define oneWireBus 27 
 
-// --- 2. INISIALISASI OBJEK ---
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 Servo pakanServo; 
 BlynkTimer timer;
 OneWire oneWire(oneWireBus);
 DallasTemperature sensors(&oneWire);
 
-// --- 3. KONFIGURASI RELAY & LDR ---
 const int KONDISI_GELAP = HIGH; 
 const int RELAY_NYALA = LOW; 
 const int RELAY_MATI = HIGH;   
 
-// --- CONFIG DELAY LAMPU ---
 const long ldrDelayDuration = 5000; 
 unsigned long ldrTimerStart = 0;
 bool isWaitingToTurnOff = false;
 
-// 1. Tinggi total botol dari sensor sampai dasar (cm)
 const float TINGGI_BOTOL = 10.0;
-
-// 2. Batas Peringatan Habis (Jarak dari sensor)
 const float BATAS_PAKAN_HABIS = 8.0;
 
-// --- 4. VARIABLE GLOBAL ---
+
 float suhuAir = 0;
-float jarak = 0;          // Jarak sensor ke permukaan pakan
-float levelPakan = 0;     // Ketinggian pakan dari dasar (Untuk Blynk)
+float jarak = 0;          
+float levelPakan = 0;     
 String labelLampu = "OFF";
 String labelPakan = "OFF";
 
-// Logic Notifikasi
 bool pakanHabisNotifSent = false; 
 
-// --- KONTROL MODE ---
 bool modeAutoLampu = true; 
 bool modeAutoPakan = true; 
 int manualLampuState = 0;  
 
-// --- 5. PENGATURAN JADWAL PAKAN ---
 unsigned long previousMillis = 0;
 const long intervalPakan = 43200000; // 12 Jam
 
-// --- FUNGSI BLYNK ---
 BLYNK_WRITE(V3) { if (param.asInt() == 1) beriPakanIkan(); }
 
 BLYNK_WRITE(V4) {
@@ -129,19 +118,12 @@ void loop() {
 
 // --- FUNGSI UTAMA (Setiap 1 Detik) ---
 void timerEvent() {
-  // 1. Baca Jarak Sensor (Jarak Udara Kosong)
   jarak = ukurJarakCm();
-
-  // 2. Hitung Level Pakan (Isi Pakan) untuk Blynk
-  // Rumus: Tinggi Botol - Jarak Udara = Tinggi Pakan
   levelPakan = TINGGI_BOTOL - jarak;
 
-  // Koreksi: Jika hasilnya minus (sensor error/tutup dibuka), set jadi 0
   if (levelPakan < 0) levelPakan = 0;
-  // Koreksi: Jika hasilnya lebih besar dari botol, mentokkan ke tinggi botol
   if (levelPakan > TINGGI_BOTOL) levelPakan = TINGGI_BOTOL;
 
-  // --- LOGIKA PERINGATAN (Tetap pakai variable 'jarak') ---
   if (jarak >= BATAS_PAKAN_HABIS) {
     if (!pakanHabisNotifSent) {
       Serial.println("Warning: Isi Pakan Abis!");
@@ -149,28 +131,22 @@ void timerEvent() {
       pakanHabisNotifSent = true; 
     }
   } else {
-    // Reset notifikasi (Histeresis 0.5cm)
     if (jarak < (BATAS_PAKAN_HABIS - 0.5) && jarak > 0) { 
        pakanHabisNotifSent = false;
     }
   }
 
-  // 3. Baca Suhu
   float tempReading = sensors.getTempCByIndex(0);
   if (tempReading != -127.00) { suhuAir = tempReading; }
   sensors.requestTemperatures(); 
 
-  // 4. Logika Lampu
   checkLampuLogic();
 
-  // 5. Update Status & LCD
   labelPakan = modeAutoPakan ? "Auto" : "Man.";
   updateLCD();
   
-  // 6. Kirim ke Blynk
   Blynk.virtualWrite(V0, suhuAir);       
   
-  // PENTING: Kirim 'levelPakan' (Isi), bukan 'jarak' (Kosong)
   Blynk.virtualWrite(V1, levelPakan);         
   
   Blynk.virtualWrite(V2, labelLampu);
@@ -222,7 +198,6 @@ void updateLCD() {
   lcd.print("L:"); lcd.print(labelLampu);
   lcd.print("  "); 
 
-  // --- LOGIKA TAMPILAN BARIS 2 ---
   lcd.setCursor(0, 1);
   
   if (jarak >= BATAS_PAKAN_HABIS) {
@@ -232,7 +207,6 @@ void updateLCD() {
     lcd.print("P:"); lcd.print(labelPakan);
     lcd.print(" "); 
 
-    // Tampilkan Jarak di LCD (Tetap cm jarak agar mudah debug)
     if (jarak > 0 && jarak < 400) { 
       lcd.print(jarak, 0); lcd.print("cm   "); 
     } else {
@@ -242,7 +216,6 @@ void updateLCD() {
   }
 }
 
-// --- FUNGSI PAKAN (TEKNIK POMPA / GETAR) ---
 void beriPakanIkan() {
   Serial.println("--- FEEDING ---");
   
@@ -250,36 +223,28 @@ void beriPakanIkan() {
   lcd.setCursor(0, 0); lcd.print(">> FEEDING TIME");
   lcd.setCursor(0, 1); lcd.print("  Nyam Nyam...  ");
 
-  // Pastikan servo terhubung
   if (!pakanServo.attached()) {
     pakanServo.attach(servoPin);
   }
 
-  // Lakukan gerakan "Pompa" sebanyak 4 kali
-  // Ini lebih efektif menjatuhkan pakan daripada cuma 1 kali buka
+  
   for (int i = 0; i < 4; i++) {
     
-    // 1. DORONG PAKAN (0 ke 160)
-    // Kita tidak pakai 180 agar tidak mentok/macet di ujung plastik
     pakanServo.write(160); 
-    delay(700); // Tunggu servo gerak
+    delay(700);
     Blynk.run();
 
-    // 2. RESET POSISI (Balik Cepat ke 0)
-    // Harus balik agar bisa dorong lagi (seperti kokang senjata)
     pakanServo.write(0);  
-    delay(700); // Tunggu servo gerak
+    delay(700); 
     Blynk.run();
   }
 
-  // Matikan servo setelah selesai agar tidak panas/berdengung
   delay(500);
   pakanServo.detach(); 
   
   lcd.clear();
 }
 
-// --- FUNGSI UKUR JARAK SIMPLE ---
 float ukurJarakCm() {
   digitalWrite(trigPin, LOW); delayMicroseconds(2);
   digitalWrite(trigPin, HIGH); delayMicroseconds(10);
